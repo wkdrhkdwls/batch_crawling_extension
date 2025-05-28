@@ -7,18 +7,20 @@ export class ElevenStCrawler implements ICrawler {
   private static readonly NON_DIGIT = /\D/g;
 
   async crawl(): Promise<Product> {
+    // 1) product_id 추출
     const idMatch = ElevenStCrawler.PRODUCT_ID_RE.exec(this.url);
-    const product_id = idMatch ? idMatch[1] : "";
+    const product_id = idMatch?.[1] ?? "";
 
+    // 2) 페이지 로드 대기
     await this.waitForSelector(".c_product_info_title_coupon h1.title");
 
-    // 상품명
-    const titleEl = document.querySelector<HTMLElement>(
-      ".c_product_info_title_coupon h1.title"
-    );
-    const title = titleEl?.textContent?.trim() ?? "";
+    // 3) title
+    const title =
+      document
+        .querySelector<HTMLElement>(".c_product_info_title_coupon h1.title")
+        ?.textContent?.trim() ?? "";
 
-    // 이미지
+    // 4) image
     const imgEl = document.querySelector<HTMLImageElement>(
       ".c_product_view_img img"
     );
@@ -32,31 +34,33 @@ export class ElevenStCrawler implements ICrawler {
       }
     }
 
-    // 최종 할인 가격
-    const priceEl = document.querySelector<HTMLSpanElement>(
-      "#finalDscPrcArea .price .value"
-    );
-    const rawPrice = priceEl?.textContent?.trim() ?? "";
+    // 5) price
+    const rawPrice =
+      document
+        .querySelector<HTMLSpanElement>("#finalDscPrcArea .price .value")
+        ?.textContent?.trim() ?? "";
     const price = Number(rawPrice.replace(ElevenStCrawler.NON_DIGIT, "")) || 0;
 
-    // 모델명
+    // 6) model_name
     const model_name = title.split(/\s+/)[0] ?? "";
 
-    // 배송비
-    const feeEl = document.querySelector<HTMLElement>(".delivery dt");
-    const feeText = feeEl?.textContent?.trim() ?? "";
+    // 7) shipping_fee
+    const feeText =
+      document
+        .querySelector<HTMLElement>(".delivery dt")
+        ?.textContent?.trim() ?? "";
     const shipping_fee = feeText.includes("무료배송")
       ? 0
       : Number(feeText.replace(ElevenStCrawler.NON_DIGIT, "")) || 0;
 
-    // 품절 여부
+    // 8) soldout 여부
     const soldout = !!document.querySelector(
       ".out-of-stock-badge, .sold-out, .oos-icon"
     );
 
-    // 도메인
+    // 9) domain (fallback 포함)
     const hostname = new URL(this.url).hostname.replace(/^www\./, "");
-    const domain = hostname.split(".")[0] as Domain;
+    const domain = (hostname.split(".")[0] as Domain) ?? "11st";
 
     return {
       product_id,
@@ -65,12 +69,13 @@ export class ElevenStCrawler implements ICrawler {
       price,
       model_name,
       shipping_fee,
-      return_fee: null,
+      return_fee: 0,
       soldout,
       domain,
     };
   }
 
+  /** selector가 나올 때까지 대기 */
   private waitForSelector(selector: string, timeout = 10_000): Promise<void> {
     return new Promise((resolve, reject) => {
       if (document.querySelector(selector)) return resolve();

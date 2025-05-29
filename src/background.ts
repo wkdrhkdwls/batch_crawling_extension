@@ -2,11 +2,12 @@ import { supabase } from "./utils/supabaseClient";
 import type { NavErrorDetails, UrlRow } from "./interface/Database";
 import { sleep } from "./utils/timeout";
 
+// 사양에 맞게 옵션값 조절
 const MAX_CONCURRENCY = 2; // 동시 탭 수
 const CRAWL_TIMEOUT = 60_000; // 로딩 타임아웃(60초)
 const NAV_RETRIES = 3; // 재시도 횟수
-const NAV_DELAY = 3_000; // 재시도 전 대기(ms)
-const MESSAGE_DELAY = 3_000; // 메시지 전송 전 대기(ms)
+const NAV_DELAY = 4_000; // 재시도 전 대기(ms)
+const MESSAGE_DELAY = 4_000; // 메시지 전송 전 대기(ms)
 const BATCH_SIZE = 5; // 한 번에 가져올 URL 개수
 
 /** 알림 띄우기 */

@@ -18,10 +18,15 @@ export class ElevenStCrawler implements ICrawler {
     );
 
     // 3) title
+
     const title =
       document
-        .querySelector<HTMLElement>(".c_product_info_title_coupon h1.title")
-        ?.textContent?.trim() ?? "";
+        .querySelector<HTMLElement>(".c_product_info_title h1.title")
+        ?.textContent?.trim() ??
+      document
+        .querySelector<HTMLElement>(".c_product_info_title .title_sub")
+        ?.textContent?.trim() ??
+      ""; // title_sub를 시도하거나 다른 방법을 추가할 수 있음
 
     // 4) image
     const imgEl = document.querySelector<HTMLImageElement>(

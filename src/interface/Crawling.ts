@@ -14,7 +14,7 @@ export interface Product {
   shipping_fee: number; // 배송비
   return_fee: number | null; // 반품 비용 (없으면 null)
   soldout: boolean; // 품절 여부
-  domain: Domain; // 크롤링 대상 도메인
+  domain?: Domain; // 크롤링 대상 도메인
   options?: string[]; // 상품 옵션 목록
 }
 

@@ -1,4 +1,4 @@
-import type { ICrawler, Product, Domain } from "../interface/Crawling";
+import type { ICrawler, Product } from "../interface/Crawling";
 
 export class CoupangCrawler implements ICrawler {
   constructor(private readonly url: string) {}
@@ -34,11 +34,7 @@ export class CoupangCrawler implements ICrawler {
     }
 
     // 상품 가격
-    // const priceEl = document.querySelector<HTMLSpanElement>(
-    //   ".prod-sale-price .total-price > strong"
-    // );
-    // const rawPrice = priceEl?.textContent?.trim() ?? "";
-    // const price = Number(rawPrice.replace(CoupangCrawler.NON_DIGIT, "")) || 0;
+
     const rawPrice =
       document
         .querySelector<HTMLSpanElement>(".prod-price .total-price > strong")
@@ -58,10 +54,6 @@ export class CoupangCrawler implements ICrawler {
     // 품절 여부
     const soldout = !!document.querySelector(".out-of-stock-badge");
 
-    // 도메인
-    const hostname = new URL(this.url).hostname.replace(/^www\./, "");
-    const domain = hostname.split(".")[0] as Domain;
-
     return {
       product_id,
       title,
@@ -71,7 +63,6 @@ export class CoupangCrawler implements ICrawler {
       shipping_fee,
       return_fee: null,
       soldout,
-      domain,
     };
   }
 

@@ -1,4 +1,4 @@
-import type { ICrawler, Product, Domain } from "../interface/Crawling";
+import type { ICrawler, Product } from "../interface/Crawling";
 
 export class ElevenStCrawler implements ICrawler {
   constructor(private readonly url: string) {}
@@ -7,7 +7,7 @@ export class ElevenStCrawler implements ICrawler {
   private static readonly NON_DIGIT = /\D/g;
 
   async crawl(): Promise<Product> {
-    // 1) product_id 추출
+    // 상품 ID
     const idMatch = ElevenStCrawler.PRODUCT_ID_RE.exec(this.url);
     const product_id = idMatch?.[1] ?? "";
 
@@ -17,8 +17,7 @@ export class ElevenStCrawler implements ICrawler {
       15_000
     );
 
-    // 3) title
-
+    // 상품명
     const title =
       document
         .querySelector<HTMLElement>(".c_product_info_title h1.title")
@@ -26,9 +25,9 @@ export class ElevenStCrawler implements ICrawler {
       document
         .querySelector<HTMLElement>(".c_product_info_title .title_sub")
         ?.textContent?.trim() ??
-      ""; // title_sub를 시도하거나 다른 방법을 추가할 수 있음
+      "";
 
-    // 4) image
+    // 이미지
     const imgEl = document.querySelector<HTMLImageElement>(
       ".c_product_view_img img"
     );
@@ -42,17 +41,17 @@ export class ElevenStCrawler implements ICrawler {
       }
     }
 
-    // 5) price
+    // 상품 가격
     const rawPrice =
       document
         .querySelector<HTMLSpanElement>("#finalDscPrcArea .price .value")
         ?.textContent?.trim() ?? "";
     const price = Number(rawPrice.replace(ElevenStCrawler.NON_DIGIT, "")) || 0;
 
-    // 6) model_name
+    // 모델명
     const model_name = title.split(/\s+/)[0] ?? "";
 
-    // 7) shipping_fee
+    // 배송비
     const feeText =
       document
         .querySelector<HTMLElement>(".delivery dt")
@@ -61,14 +60,10 @@ export class ElevenStCrawler implements ICrawler {
       ? 0
       : Number(feeText.replace(ElevenStCrawler.NON_DIGIT, "")) || 0;
 
-    // 8) soldout 여부
+    // 품절 여부
     const soldout = !!document.querySelector(
       ".out-of-stock-badge, .sold-out, .oos-icon"
     );
-
-    // 9) domain (fallback 포함)
-    const hostname = new URL(this.url).hostname.replace(/^www\./, "");
-    const domain = (hostname.split(".")[0] as Domain) ?? "11st";
 
     return {
       product_id,
@@ -79,7 +74,6 @@ export class ElevenStCrawler implements ICrawler {
       shipping_fee,
       return_fee: 0,
       soldout,
-      domain,
     };
   }
 

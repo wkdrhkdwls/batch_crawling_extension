@@ -25,3 +25,12 @@ export interface Database {
   urls: UrlRow;
   results: ResultRow;
 }
+
+export interface NavErrorDetails {
+  tabId: number;
+  url: string;
+  processId: number;
+  frameId: number;
+  timeStamp: number;
+  error: string;
+}

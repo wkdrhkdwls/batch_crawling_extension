@@ -1,14 +1,9 @@
-// background.ts
-
 import { supabase } from "./utils/supabaseClient";
-import type { UrlRow } from "./interface/Database";
+import type { NavErrorDetails, UrlRow } from "./interface/Database";
 
 const BATCH_SIZE = 10;
-const CRAWL_TIMEOUT = 30_000; // 30초
+const CRAWL_TIMEOUT = 30_000;
 
-/**
- * offset부터 BATCH_SIZE개씩 UrlRow를 가져옵니다.
- */
 async function fetchPendingUrls(offset = 0): Promise<UrlRow[]> {
   const { data, error } = await supabase
     .from("urls")
@@ -36,11 +31,6 @@ async function saveResult(urlId: number, payload: any) {
   if (error) console.error(`Result 저장 오류 (url_id=${urlId})`, error);
 }
 
-/**
- * 1개의 URL에 대해 탭 열고,
- * 로드 완료 후 contents.js 주입 → 메시지 → DB 저장 → 탭 닫기
- * 타임아웃 처리 포함
- */
 function crawlAndSave(row: UrlRow): Promise<void> {
   return new Promise((resolve) => {
     chrome.tabs.create({ url: row.url, active: false }, (tab) => {
@@ -50,12 +40,23 @@ function crawlAndSave(row: UrlRow): Promise<void> {
       // 타임아웃: 일정 시간 내에 끝나지 않으면 강제 종료
       const timeoutId = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(onUpdated);
+        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
         chrome.tabs.remove(tabId);
         console.warn(`크롤 타임아웃 [${row.url}]`);
         resolve();
       }, CRAWL_TIMEOUT);
 
-      // 탭이 완전히 로드됐을 때
+      const onNavError = (details: NavErrorDetails) => {
+        if (details.tabId !== tabId) return;
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
+        clearTimeout(timeoutId);
+        console.error(`네비게이션 오류 [${row.url}]: ${details.error}`);
+        chrome.tabs.remove(tabId);
+        resolve();
+      };
+      chrome.webNavigation.onErrorOccurred.addListener(onNavError);
+
       const onUpdated = (
         updatedTabId: number,
         changeInfo: chrome.tabs.TabChangeInfo
@@ -63,16 +64,15 @@ function crawlAndSave(row: UrlRow): Promise<void> {
         if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
 
         chrome.tabs.onUpdated.removeListener(onUpdated);
+        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
         clearTimeout(timeoutId);
 
-        // 1) contents.js 인젝션
         chrome.scripting
           .executeScript({
             target: { tabId },
             files: ["contents.js"],
           })
           .then(() => {
-            // 2) 메시지 보내서 크롤링 요청
             chrome.tabs.sendMessage(
               tabId,
               { type: "CRAWL_REQUEST", payload: { url: row.url } },

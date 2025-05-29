@@ -28,6 +28,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((error) => {
         sendResponse({ success: false, error: error.message });
       });
-    return true; // 비동기 응답 유지
+    return true;
   }
 });

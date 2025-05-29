@@ -3,7 +3,7 @@
   "name": "Batch Castingn 크롤링 익스텐션",
   "version": "1.0.0",
 
-  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "permissions": ["activeTab", "scripting", "clipboardWrite", "webNavigation"],
   "host_permissions": ["https://*.coupang.com/*", "https://*.11st.co.kr/*"],
 
   "background": {

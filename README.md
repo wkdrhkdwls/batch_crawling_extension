@@ -1,6 +1,6 @@
 # CastingN Crowling Project
 
-## 11번가(11st) 및 쿠팡(Coupang)의 상품 정보를 크롤링하고 Supabase에 저장하는 크롬 확장 프로그램입니다.
+## Supabase 저장된 URL을 기반으로 11번가(11st) 및 쿠팡(Coupang)의 상품 정보를 크롤링하고 Supabase에 저장하는 크롬 확장 프로그램입니다.
 
 ## 🛠️ 기술 스택
 

@@ -112,3 +112,4 @@ CREATE TABLE results (
   crawled_at timestamp DEFAULT CURRENT_TIMESTAMP
 );
 ```
+<img width="999" alt="Image" src="https://github.com/user-attachments/assets/6b8ef80d-ca42-4448-9c97-af1e56b57f77" />

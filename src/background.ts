@@ -70,7 +70,7 @@ chrome.action.onClicked.addListener(async () => {
         chrome.windows.create(
           {
             url: "about:blank",
-            state: "minimized",
+
             focused: true,
           },
           (win) => {

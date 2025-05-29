@@ -12,7 +12,7 @@ export class ElevenStCrawler implements ICrawler {
     const product_id = idMatch?.[1] ?? "";
 
     // 2) 페이지 로드 대기
-    await this.waitForSelector(".c_product_info_title_coupon h1.title");
+    await this.waitForSelector('[class^="c_product_info_title"] h1.title');
 
     // 3) title
     const title =

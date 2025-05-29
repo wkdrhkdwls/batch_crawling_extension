@@ -1,27 +1,114 @@
-환경 node js 22 버전
-디렉토리 구성도
-📁 extension/
-├── 📁 src/
-│ ├── 📁 interface/
-│ │ └── 📄 Crawling.ts - 수집 업체에 대한 인터페이스 정의
-│ └── 📁 service/
-│ ├── 📄 CoupangCrawling.ts - 쿠팡 DOM 크롤링
-│ ├── 📄 NaverCrawling.ts - 네이버 DOM 크롤링
-│ ├── 📄 option.ts - 네이버 DOM의 옵션 크롤링
-│ └── 📄 Yes24Crwaling.ts - Yes24 DOM 크롤링
-├── 📄 background.ts
-├── 📄 contents.ts
-├── 📄 .env
-└── 📄 package.json
+# CastingN Crowling Project
 
-- background.ts 주요 역할 일반적인 프로젝트의 백엔드에 해당하는 역할을 담당함
-  - 외부 API 통신
-  - 크롬 브라우저에 오픈된 탭을 컨트롤 ex) 특정 탭을 타겟으로 페이지 이동, 새 탭 생성, 탭 닫기, 탭 로딩 오류감지 등
-  - 메시지큐에서 받아온 수집 요청 데이터를 수신
-  - contents.ts에 수집 명령
-  - 수집 된 데이터 마켓 프로젝트로 전송
-- contents.ts 주요 역할 열린 탭의 페이지에 삽입되는 js코드로 이해할 수 있음
-  - background.ts에서 받은 명령(크롤링)을 수행
-  - 쇼핑몰 타입에 따른 인터페이스에 동적바인딩된 요소의 크롤링 메서드를 실행
-  - 크롤링된 데이터를 background.ts로 전송
-  - .env 주요 사항 해당 도메인 주소가 메시지큐의 데이터를 수신하는 endpoint에 대한 정의된 자료입니다. 빌드하여 배포할 때 해당 url설정에 주의하여 빌드해야합니다.
+## 11번가(11st) 및 쿠팡(Coupang)의 상품 정보를 크롤링하고 Supabase에 저장하는 크롬 확장 프로그램입니다.
+
+## 🛠️ 기술 스택
+
+- Node.js 22
+- TypeScript
+- Vite
+- Supabase
+- Chrome Extension API
+
+## 프로젝트 구조
+
+```bash
+📦 crawling_extension
+┣ 📂 public # 크롬 익스텐션 manifest, 아이콘 등 정적 자산
+┃ ┣ 📂 icons
+┃ ┃ ┗ 📜 crawl-128.png # 익스텐션 아이콘
+┃ ┗ 📜 manifest.json # 크롬 익스텐션 매니페스트 파일
+┣ 📂 src # 메인 소스코드
+┃ ┣ 📂 interface # 타입스크립트 인터페이스 정의
+┃ ┃ ┣ 📜 Crawling.ts
+┃ ┃ ┗ 📜 Database.ts
+┃ ┣ 📂 service # 웹사이트별 크롤링 서비스
+┃ ┃ ┣ 📜 CoupangCrawling.ts
+┃ ┃ ┗ 📜 ElevenstCrawling.ts
+┃ ┣ 📂 utils # 유틸리티 함수
+┃ ┃ ┣ 📜 supabaseClient.ts
+┃ ┃ ┗ 📜 timeout.ts
+┃ ┣ 📜 background.ts # 크롬 백그라운드 스크립트
+┃ ┣ 📜 contents.ts # 콘텐츠 스크립트
+┃ ┗ 📜 env.d.ts # 환경변수 타입 정의
+┣ 📜 .env # 환경변수 설정파일 (Supabase 설정)
+┣ 📜 .gitignore
+┣ 📜 package-lock.json
+┣ 📜 package.json
+┣ 📜 README.md
+┣ 📜 tsconfig.json
+┗ 📜 vite.config.ts
+```
+
+## ⚙️ 설치 및 실행 방법
+
+### 1. 레포지토리 클론 후 의존성 설치
+
+```bash
+git clone <repository-url>
+cd crawling_extension
+npm install
+```
+
+### 2. Supabase 설정 (.env 파일)
+
+- .env 파일에 아래의 환경 변수를 설정합니다.
+
+```env
+VITE_SUPABASE_URL=여기에_supabase_url입력
+VITE_SUPABASE_ANON_KEY=여기에_supabase_anon_key입력
+```
+
+### 3. 빌드하기
+
+```bash
+npm run build
+```
+
+### 4. 크롬 브라우저에서 확장 프로그램 로드하기
+
+- 크롬 브라우저 주소창에서 chrome://extensions로 이동
+
+- 개발자 모드 활성화 후, 압축해제된 확장 프로그램을 로드 선택
+
+- 프로젝트 루트의 dist 폴더 선택
+
+### 🚀 사용법
+
+- 크롬 익스텐션 아이콘을 클릭하여 크롤링 시작
+
+- 크롤링 진행상황과 완료 알림이 표시됩니다.
+
+- 크롤링한 데이터는 Supabase의 DB에 저장됩니다.
+
+### 🗃 데이터 스키마
+
+- urls 테이블
+
+```sql
+CREATE TABLE urls (
+  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  domain varchar(255),
+  url text NOT NULL,
+  name varchar(255),
+  created_at timestamp DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+- results 테이블
+
+```sql
+CREATE TABLE results (
+  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  url_id bigint REFERENCES urls(id),
+  product_id varchar(50),
+  title text,
+  image text,
+  price int,
+  model_name text,
+  shipping_fee int,
+  return_fee int,
+  soldout boolean,
+  crawled_at timestamp DEFAULT CURRENT_TIMESTAMP
+);
+```

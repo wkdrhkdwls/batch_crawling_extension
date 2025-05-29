@@ -1,10 +1,15 @@
 import { supabase } from "./utils/supabaseClient";
-import type { UrlRow } from "./interface/Database";
+import type { NavErrorDetails, UrlRow } from "./interface/Database";
+import { sleep } from "./utils/timeout";
 
-const BATCH_SIZE = 10;
-const CRAWL_TIMEOUT = 30_000;
-const MAX_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 2; // 동시 탭 수
+const CRAWL_TIMEOUT = 60_000; // 느린 페이지 대비
+const NAV_RETRIES = 3; // 재시도 횟수
+const NAV_DELAY = 1_000; // 재시도 전 1초 대기
+const MESSAGE_DELAY = 1_000; // 메시지 전송 전 1초 대기
+const BATCH_SIZE = 5; // 가져올 URL 개수
 
+/** 모든 대기 중인 URL을 배치 단위로 가져옴 */
 async function fetchAllPendingUrls(): Promise<UrlRow[]> {
   let offset = 0;
   const rows: UrlRow[] = [];
@@ -15,107 +20,127 @@ async function fetchAllPendingUrls(): Promise<UrlRow[]> {
       .select("id, domain, url, name")
       .order("id", { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
-
     if (error) throw error;
-    if (!data?.length) break;
-
+    if (!data || data.length === 0) break;
     rows.push(...data);
     offset += BATCH_SIZE;
   }
-
   return rows;
 }
 
-function waitForLoad(tabId: number): Promise<void> {
+/**
+ * 탭이 'complete' 되면 true,
+ * 에러/타임아웃 시 false
+ */
+function waitForLoad(tabId: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const timeoutId = setTimeout(() => {
+    const tO = setTimeout(() => {
       cleanup();
       console.warn(`크롤 타임아웃 [tabId=${tabId}]`);
-      resolve();
+      resolve(false);
     }, CRAWL_TIMEOUT);
 
-    const onError = (details: { tabId: number; error: string }) => {
-      if (details.tabId !== tabId) return;
+    const onErr = (d: NavErrorDetails) => {
+      if (d.tabId !== tabId) return;
       cleanup();
-      console.error(`네비게이션 오류 [tabId=${tabId}]: ${details.error}`);
-      resolve();
+      console.error(`네비게이션 오류 [tabId=${tabId}]: ${d.error}`);
+      resolve(false);
     };
-    chrome.webNavigation.onErrorOccurred.addListener(onError);
+    chrome.webNavigation.onErrorOccurred.addListener(onErr);
 
-    const onUpdated = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
-      if (_tabId !== tabId || info.status !== "complete") return;
-      cleanup();
-      resolve();
+    const onUpd = (_id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (_id === tabId && info.status === "complete") {
+        cleanup();
+        resolve(true);
+      }
     };
-    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onUpdated.addListener(onUpd);
 
     function cleanup() {
-      clearTimeout(timeoutId);
-      chrome.webNavigation.onErrorOccurred.removeListener(onError);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(tO);
+      chrome.webNavigation.onErrorOccurred.removeListener(onErr);
+      chrome.tabs.onUpdated.removeListener(onUpd);
     }
   });
 }
 
-chrome.action.onClicked.addListener(async () => {
-  try {
-    const urls = await fetchAllPendingUrls();
-    if (urls.length === 0) {
-      console.log("크롤링할 URL이 없습니다.");
-      return;
-    }
-
-    const newWin = await new Promise<chrome.windows.Window>(
-      (resolve, reject) => {
-        chrome.windows.create(
-          {
-            url: "about:blank",
-
-            focused: true,
-          },
-          (win) => {
-            if (!win) {
-              reject(new Error("새 창 생성에 실패했습니다."));
-            } else {
-              resolve(win);
-            }
-          }
-        );
-      }
+/**
+ * 주어진 URL을 최대 retries번 재시도하며 내비게이션.
+ * 성공 시 true, 모두 실패 시 false
+ */
+async function navigateWithRetry(
+  tabId: number,
+  url: string,
+  retries = NAV_RETRIES
+): Promise<boolean> {
+  for (let i = 0; i <= retries; i++) {
+    await new Promise<void>((r) =>
+      chrome.tabs.update(tabId, { url }, () => {
+        if (chrome.runtime.lastError) {
+          console.warn(
+            `tabs.update 실패 [${url}]: ${chrome.runtime.lastError.message}`
+          );
+        }
+        r();
+      })
     );
-    const windowId = newWin.id!;
+    const ok = await waitForLoad(tabId);
+    if (ok) return true;
+    console.warn(`→ 내비 재시도 #${i + 1} [${url}]`);
+    await sleep(NAV_DELAY);
+  }
+  console.error(`→ 내비게이션 최종 실패, 건너뜁니다: ${url}`);
+  return false;
+}
 
-    const resultsToInsert: any[] = [];
-    let currentIndex = 0;
+/**
+ * 하나의 워커: 탭 하나를 열고, URL 리스트를 순차 처리한 뒤 닫음
+ */
+async function worker(urls: UrlRow[], idxRef: { current: number }) {
+  const tab = await new Promise<chrome.tabs.Tab>((res) =>
+    chrome.tabs.create({ url: "about:blank", active: false }, res)
+  );
+  const tabId = tab.id!;
 
-    const worker = async () => {
-      const first = urls[currentIndex];
-      const tab = await new Promise<chrome.tabs.Tab>((resolve) =>
-        chrome.tabs.create({ windowId, url: first.url, active: false }, resolve)
-      );
-      const tabId = tab.id!;
+  try {
+    while (true) {
+      const i = idxRef.current++;
+      if (i >= urls.length) break;
+      const row = urls[i];
 
-      while (true) {
-        const idx = currentIndex++;
-        if (idx >= urls.length) break;
-        const row = urls[idx];
+      try {
+        // 1) 내비게이션 + 재시도
+        const ok = await navigateWithRetry(tabId, row.url);
+        if (!ok) continue;
 
-        await new Promise<void>((resolve) =>
-          chrome.tabs.update(tabId, { url: row.url }, () => resolve())
-        );
+        // 2) 안정화 대기
+        await sleep(MESSAGE_DELAY);
 
-        await waitForLoad(tabId);
-
-        const res = await new Promise<any>((resolve) =>
+        // 3) 메시지 전송 & 응답
+        const res: any = await new Promise((resolve) => {
           chrome.tabs.sendMessage(
             tabId,
             { type: "CRAWL_REQUEST", payload: { url: row.url } },
-            resolve
-          )
-        );
+            (msg) => {
+              if (chrome.runtime.lastError) {
+                console.warn(
+                  `sendMessage 실패 [${row.url}]: ${chrome.runtime.lastError.message}`
+                );
+                resolve(null);
+              } else {
+                resolve(msg);
+              }
+            }
+          );
+        });
+        if (!res) {
+          console.warn(`크롤 응답 없음 — 건너뜁니다: ${row.url}`);
+          continue;
+        }
 
-        if (res?.success) {
-          resultsToInsert.push({
+        // 4) 성공 시 DB 저장
+        if (res.success) {
+          const { error } = await supabase.from("results").insert({
             url_id: row.id,
             product_id: res.result.product_id,
             title: res.result.title,
@@ -127,18 +152,33 @@ chrome.action.onClicked.addListener(async () => {
             soldout: res.result.soldout,
             crawled_at: new Date().toISOString(),
           });
+          if (error)
+            console.error(`Result 저장 오류 (url_id=${row.id})`, error);
         } else {
-          console.error(`크롤 실패 [${row.url}]`, res?.error);
+          console.error(`크롤 실패 [${row.url}]`, res.error);
         }
+      } catch (e) {
+        console.error(`처리 중 에러 [${row.url}]`, e);
       }
+    }
+  } finally {
+    chrome.tabs.remove(tabId);
+  }
+}
 
-      chrome.tabs.remove(tabId);
-    };
+chrome.action.onClicked.addListener(async () => {
+  try {
+    const urls = await fetchAllPendingUrls();
+    if (urls.length === 0) {
+      console.log("크롤링할 URL이 없습니다.");
+      return;
+    }
 
-    await Promise.all(Array.from({ length: MAX_CONCURRENCY }, () => worker()));
+    const idxRef = { current: 0 };
 
-    const { error } = await supabase.from("results").insert(resultsToInsert);
-    if (error) console.error("Bulk insert 오류", error);
+    await Promise.all(
+      Array.from({ length: MAX_CONCURRENCY }, () => worker(urls, idxRef))
+    );
 
     console.log("모든 크롤링 및 저장 완료");
   } catch (e) {

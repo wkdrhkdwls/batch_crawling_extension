@@ -3,7 +3,7 @@
   "name": "Batch Castingn 크롤링 익스텐션",
   "version": "1.0.0",
 
-  "permissions": ["activeTab", "scripting", "clipboardWrite", "webNavigation"],
+  "permissions": ["activeTab", "clipboardWrite", "webNavigation"],
   "host_permissions": ["https://*.coupang.com/*", "https://*.11st.co.kr/*"],
 
   "background": {
@@ -19,13 +19,6 @@
     {
       "matches": ["https://www.coupang.com/*", "https://www.11st.co.kr/*"],
       "js": ["contents.js"]
-    }
-  ],
-
-  "web_accessible_resources": [
-    {
-      "resources": ["contents.js"],
-      "matches": ["https://*.coupang.com/*", "https://*.11st.co.kr/*"]
     }
   ]
 }

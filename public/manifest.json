@@ -3,7 +3,12 @@
   "name": "Batch Castingn 크롤링 익스텐션",
   "version": "1.0.0",
 
-  "permissions": ["activeTab", "clipboardWrite", "webNavigation"],
+  "permissions": [
+    "activeTab",
+    "clipboardWrite",
+    "webNavigation",
+    "notifications"
+  ],
   "host_permissions": ["https://*.coupang.com/*", "https://*.11st.co.kr/*"],
 
   "background": {
@@ -12,7 +17,8 @@
   },
 
   "action": {
-    "default_title": "크롤링 결과 복사"
+    "default_title": "크롤링 시작",
+    "default_icon": "icons/crawl-128.png"
   },
 
   "content_scripts": [

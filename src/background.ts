@@ -3,11 +3,21 @@ import type { NavErrorDetails, UrlRow } from "./interface/Database";
 import { sleep } from "./utils/timeout";
 
 const MAX_CONCURRENCY = 2; // 동시 탭 수
-const CRAWL_TIMEOUT = 60_000; // 느린 페이지 대비
+const CRAWL_TIMEOUT = 60_000; // 로딩 타임아웃(60초)
 const NAV_RETRIES = 3; // 재시도 횟수
-const NAV_DELAY = 1_000; // 재시도 전 1초 대기
-const MESSAGE_DELAY = 1_000; // 메시지 전송 전 1초 대기
-const BATCH_SIZE = 5; // 가져올 URL 개수
+const NAV_DELAY = 3_000; // 재시도 전 대기(ms)
+const MESSAGE_DELAY = 3_000; // 메시지 전송 전 대기(ms)
+const BATCH_SIZE = 5; // 한 번에 가져올 URL 개수
+
+/** 알림 띄우기 */
+function notify(title: string, message: string) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "icons/crawl-128.png",
+    title,
+    message,
+  });
+}
 
 /** 모든 대기 중인 URL을 배치 단위로 가져옴 */
 async function fetchAllPendingUrls(): Promise<UrlRow[]> {
@@ -25,6 +35,7 @@ async function fetchAllPendingUrls(): Promise<UrlRow[]> {
     rows.push(...data);
     offset += BATCH_SIZE;
   }
+
   return rows;
 }
 
@@ -65,7 +76,7 @@ function waitForLoad(tabId: number): Promise<boolean> {
 }
 
 /**
- * 주어진 URL을 최대 retries번 재시도하며 내비게이션.
+ * URL 내비게이션을 최대 retries번 재시도.
  * 성공 시 true, 모두 실패 시 false
  */
 async function navigateWithRetry(
@@ -94,7 +105,7 @@ async function navigateWithRetry(
 }
 
 /**
- * 하나의 워커: 탭 하나를 열고, URL 리스트를 순차 처리한 뒤 닫음
+ * 워커: 하나의 탭을 열고 URL 리스트를 순차 처리 → 탭 닫기
  */
 async function worker(urls: UrlRow[], idxRef: { current: number }) {
   const tab = await new Promise<chrome.tabs.Tab>((res) =>
@@ -117,7 +128,7 @@ async function worker(urls: UrlRow[], idxRef: { current: number }) {
         await sleep(MESSAGE_DELAY);
 
         // 3) 메시지 전송 & 응답
-        const res: any = await new Promise((resolve) => {
+        const res: any = await new Promise((r) => {
           chrome.tabs.sendMessage(
             tabId,
             { type: "CRAWL_REQUEST", payload: { url: row.url } },
@@ -126,9 +137,9 @@ async function worker(urls: UrlRow[], idxRef: { current: number }) {
                 console.warn(
                   `sendMessage 실패 [${row.url}]: ${chrome.runtime.lastError.message}`
                 );
-                resolve(null);
+                r(null);
               } else {
-                resolve(msg);
+                r(msg);
               }
             }
           );
@@ -138,7 +149,7 @@ async function worker(urls: UrlRow[], idxRef: { current: number }) {
           continue;
         }
 
-        // 4) 성공 시 DB 저장
+        // 4) DB 저장
         if (res.success) {
           const { error } = await supabase.from("results").insert({
             url_id: row.id,
@@ -168,20 +179,28 @@ async function worker(urls: UrlRow[], idxRef: { current: number }) {
 
 chrome.action.onClicked.addListener(async () => {
   try {
+    // 시작 알림
+    notify("크롤링 시작", "크롤링을 시작합니다");
+
     const urls = await fetchAllPendingUrls();
     if (urls.length === 0) {
-      console.log("크롤링할 URL이 없습니다.");
+      notify("크롤링 중단", "크롤링할 URL이 없습니다.");
       return;
     }
 
+    // 인덱스 공유 객체
     const idxRef = { current: 0 };
 
+    // 워커 풀 실행
     await Promise.all(
       Array.from({ length: MAX_CONCURRENCY }, () => worker(urls, idxRef))
     );
 
+    // 완료 알림
+    notify("크롤링 완료", "모든 페이지 크롤링 및 저장이 끝났습니다.");
     console.log("모든 크롤링 및 저장 완료");
   } catch (e) {
     console.error("배치 크롤링 오류", e);
+    notify("크롤링 오류", (e as Error).message);
   }
 });

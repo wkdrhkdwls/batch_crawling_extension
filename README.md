@@ -45,8 +45,8 @@
 ### 1. 레포지토리 클론 후 의존성 설치
 
 ```bash
-git clone <repository-url>
-cd crawling_extension
+git clone https://github.com/wkdrhkdwls/batch_crawling_extension
+cd batch_crawling_extension
 npm install
 ```
 

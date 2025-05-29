@@ -1,122 +1,144 @@
 import { supabase } from "./utils/supabaseClient";
-import type { NavErrorDetails, UrlRow } from "./interface/Database";
+import type { UrlRow } from "./interface/Database";
 
 const BATCH_SIZE = 10;
 const CRAWL_TIMEOUT = 30_000;
+const MAX_CONCURRENCY = 3;
 
-async function fetchPendingUrls(offset = 0): Promise<UrlRow[]> {
-  const { data, error } = await supabase
-    .from("urls")
-    .select("id, domain, url, name")
-    .order("id", { ascending: true })
-    .range(offset, offset + BATCH_SIZE - 1);
+async function fetchAllPendingUrls(): Promise<UrlRow[]> {
+  let offset = 0;
+  const rows: UrlRow[] = [];
 
-  if (error) throw error;
-  return data ?? [];
+  while (true) {
+    const { data, error } = await supabase
+      .from("urls")
+      .select("id, domain, url, name")
+      .order("id", { ascending: true })
+      .range(offset, offset + BATCH_SIZE - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+
+    rows.push(...data);
+    offset += BATCH_SIZE;
+  }
+
+  return rows;
 }
 
-async function saveResult(urlId: number, payload: any) {
-  const { error } = await supabase.from("results").insert({
-    url_id: urlId,
-    product_id: payload.product_id,
-    title: payload.title,
-    image: payload.image,
-    price: payload.price,
-    model_name: payload.model_name,
-    shipping_fee: payload.shipping_fee,
-    return_fee: payload.return_fee,
-    soldout: payload.soldout,
-    crawled_at: new Date().toISOString(),
-  });
-  if (error) console.error(`Result 저장 오류 (url_id=${urlId})`, error);
-}
-
-function crawlAndSave(row: UrlRow): Promise<void> {
+function waitForLoad(tabId: number): Promise<void> {
   return new Promise((resolve) => {
-    chrome.tabs.create({ url: row.url, active: false }, (tab) => {
-      if (!tab.id) return resolve();
-      const tabId = tab.id;
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      console.warn(`크롤 타임아웃 [tabId=${tabId}]`);
+      resolve();
+    }, CRAWL_TIMEOUT);
 
-      // 타임아웃: 일정 시간 내에 끝나지 않으면 강제 종료
-      const timeoutId = setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
-        chrome.tabs.remove(tabId);
-        console.warn(`크롤 타임아웃 [${row.url}]`);
-        resolve();
-      }, CRAWL_TIMEOUT);
+    const onError = (details: { tabId: number; error: string }) => {
+      if (details.tabId !== tabId) return;
+      cleanup();
+      console.error(`네비게이션 오류 [tabId=${tabId}]: ${details.error}`);
+      resolve();
+    };
+    chrome.webNavigation.onErrorOccurred.addListener(onError);
 
-      const onNavError = (details: NavErrorDetails) => {
-        if (details.tabId !== tabId) return;
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
-        clearTimeout(timeoutId);
-        console.error(`네비게이션 오류 [${row.url}]: ${details.error}`);
-        chrome.tabs.remove(tabId);
-        resolve();
-      };
-      chrome.webNavigation.onErrorOccurred.addListener(onNavError);
+    const onUpdated = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
+      if (_tabId !== tabId || info.status !== "complete") return;
+      cleanup();
+      resolve();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
 
-      const onUpdated = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.TabChangeInfo
-      ) => {
-        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        chrome.webNavigation.onErrorOccurred.removeListener(onNavError);
-        clearTimeout(timeoutId);
-
-        chrome.scripting
-          .executeScript({
-            target: { tabId },
-            files: ["contents.js"],
-          })
-          .then(() => {
-            chrome.tabs.sendMessage(
-              tabId,
-              { type: "CRAWL_REQUEST", payload: { url: row.url } },
-              async (res) => {
-                try {
-                  if (res?.success) {
-                    await saveResult(row.id, res.result);
-                  } else {
-                    console.error(`크롤 실패 [${row.url}]`, res?.error);
-                  }
-                } catch (e) {
-                  console.error(`saveResult 중 오류 [${row.url}]`, e);
-                } finally {
-                  chrome.tabs.remove(tabId);
-                  resolve();
-                }
-              }
-            );
-          })
-          .catch((err) => {
-            console.error(`스크립트 주입 오류 [${row.url}]`, err);
-            chrome.tabs.remove(tabId);
-            resolve();
-          });
-      };
-
-      chrome.tabs.onUpdated.addListener(onUpdated);
-    });
+    function cleanup() {
+      clearTimeout(timeoutId);
+      chrome.webNavigation.onErrorOccurred.removeListener(onError);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    }
   });
 }
 
 chrome.action.onClicked.addListener(async () => {
   try {
-    let offset = 0;
-
-    while (true) {
-      const urls = await fetchPendingUrls(offset);
-      if (urls.length === 0) break;
-
-      // 병렬 처리 (10개씩)
-      await Promise.all(urls.map(crawlAndSave));
-
-      offset += BATCH_SIZE;
+    const urls = await fetchAllPendingUrls();
+    if (urls.length === 0) {
+      console.log("크롤링할 URL이 없습니다.");
+      return;
     }
+
+    const newWin = await new Promise<chrome.windows.Window>(
+      (resolve, reject) => {
+        chrome.windows.create(
+          {
+            url: "about:blank",
+            state: "minimized",
+            focused: true,
+          },
+          (win) => {
+            if (!win) {
+              reject(new Error("새 창 생성에 실패했습니다."));
+            } else {
+              resolve(win);
+            }
+          }
+        );
+      }
+    );
+    const windowId = newWin.id!;
+
+    const resultsToInsert: any[] = [];
+    let currentIndex = 0;
+
+    const worker = async () => {
+      const first = urls[currentIndex];
+      const tab = await new Promise<chrome.tabs.Tab>((resolve) =>
+        chrome.tabs.create({ windowId, url: first.url, active: false }, resolve)
+      );
+      const tabId = tab.id!;
+
+      while (true) {
+        const idx = currentIndex++;
+        if (idx >= urls.length) break;
+        const row = urls[idx];
+
+        await new Promise<void>((resolve) =>
+          chrome.tabs.update(tabId, { url: row.url }, () => resolve())
+        );
+
+        await waitForLoad(tabId);
+
+        const res = await new Promise<any>((resolve) =>
+          chrome.tabs.sendMessage(
+            tabId,
+            { type: "CRAWL_REQUEST", payload: { url: row.url } },
+            resolve
+          )
+        );
+
+        if (res?.success) {
+          resultsToInsert.push({
+            url_id: row.id,
+            product_id: res.result.product_id,
+            title: res.result.title,
+            image: res.result.image,
+            price: res.result.price,
+            model_name: res.result.model_name,
+            shipping_fee: res.result.shipping_fee,
+            return_fee: res.result.return_fee,
+            soldout: res.result.soldout,
+            crawled_at: new Date().toISOString(),
+          });
+        } else {
+          console.error(`크롤 실패 [${row.url}]`, res?.error);
+        }
+      }
+
+      chrome.tabs.remove(tabId);
+    };
+
+    await Promise.all(Array.from({ length: MAX_CONCURRENCY }, () => worker()));
+
+    const { error } = await supabase.from("results").insert(resultsToInsert);
+    if (error) console.error("Bulk insert 오류", error);
 
     console.log("모든 크롤링 및 저장 완료");
   } catch (e) {
